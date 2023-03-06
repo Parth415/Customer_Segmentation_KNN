@@ -1,0 +1,341 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+# In[28]:
+
+
+import matplotlib.pyplot as plt
+get_ipython().run_line_magic('matplotlib', 'inline')
+sns.set(color_codes=True)
+
+
+# In[3]:
+
+
+### Data Standardization and Modeling with K-Means and PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+
+
+# In[4]:
+
+
+# !/usr/bin/env/ python
+
+from IPython.display import display, HTML
+display(HTML("<style>.container { width:100% !important; }</style>"))
+
+import urllib
+import pyodbc
+# import tqdm as tqdm
+import snowflake.connector
+from sqlalchemy import create_engine
+from snowflake.sqlalchemy import URL
+import pandas as pd
+import numpy as n
+
+import os
+import json
+from datetime import date 
+
+
+# In[5]:
+
+
+os.chdir("C:\\Users\\prapa001\\OneDrive - Corporate\\Desktop\\python_trials")
+
+
+credentials= json.load(open( "credentials.json")) 
+
+
+
+
+cnxn_str = ("Driver={ODBC Driver 17 for SQL Server};"
+            "Server=WINMPNDBp01;"
+            "Database=ANALYSIS_PROJECTS;"
+            "UID="+credentials['SQL']['user'] + ";" 
+            +"pwd=" + credentials['SQL']['password'] +";" +
+            "Trusted_Connection=Yes;"
+           )
+sql_connection = pyodbc.connect(cnxn_str)
+
+sf_connection = snowflake.connector.connect( 
+    user =credentials['SF']['user'], 
+    password=credentials['SF']['password'] ,
+    role='SF_SCM_ANALYTICS_DBRL',
+    account='staples.east-us-2.azure', 
+    warehouse='CAP_PRD_SC_WH',
+    database='DATALAB_SANDBOX',
+    schema='SCM_ANALYTICS',
+    authenticator='externalbrowser' 
+    ) 
+
+
+engine = create_engine(URL(
+    user =credentials['SF']['user'], 
+    password=credentials['SF']['password'],
+    role='SF_SCM_ANALYTICS_DBRL',
+    account='staples.east-us-2.azure', 
+    warehouse='CAP_PRD_SC_WH',
+    database='DATALAB_SANDBOX',
+    schema='SCM_ANALYTICS',
+    authenticator='externalbrowser' 
+))
+
+
+# In[8]:
+
+
+Query = '''SELECT Fiscal_Year, 
+       Fiscal_Period,
+       Master_Customer_Name,
+       DENSE_RANK() OVER (PARTITION BY Prime_FC ORDER BY Fiscal_Year)  as Dense_FC,
+       DENSE_RANK() OVER (PARTITION BY Fiscal_year ORDER BY Fiscal_Period ASC)  as Dense_Period,
+       DENSE_RANK() OVER (PARTITION BY Fiscal_Period ORDER BY sum(ADJUSTED_NET_SALES_W_COU_AMT_$) DESC) AS dense_rank,
+       sum(ADJUSTED_NET_SALES_W_COU_AMT_$) as Net_Sales
+FROM linked.CTS_1P.[CTS_2.0_All_BUs_Data_V] 
+WHERE (((Fiscal_Year = '2019' AND  Fiscal_Period IN ('1','2','3','4','5','6','7','8','9','10','11','12'))) OR
+       ((Fiscal_Year = '2021' AND  Fiscal_Period IN ('1','2','3','4','5','6','7','8','9','10','11','12'))) OR
+       ((Fiscal_Year = '2022' AND  Fiscal_Period IN ('1','2','3','4','5','6','7','8','9','10','11','12')))) AND 
+         PRIME_FC IN ('839','972') AND 
+         BU = 'Contract'    
+GROUP BY Prime_FC,
+         Fiscal_Year,
+         BU,
+         Fiscal_Period,
+         Master_Customer_Name
+ORDER BY Net_Sales DESC'''
+
+
+# In[9]:
+
+
+Master_customer =pd.read_sql(Query,sql_connection)
+Master_customer.head()
+type(Master_customer)
+
+
+# In[9]:
+
+
+Master_customer[(Master_customer.Master_Customer_Name == 'HARMONY PUBLIC SCHOOLS')&(Master_customer.Fiscal_Period == 1)]
+
+
+# In[10]:
+
+
+# P1 Customer Analysis
+Demand_P1 = Master_customer[Master_customer['Fiscal_Period'] == 1]
+print(Demand_P1)
+
+
+# In[11]:
+
+
+Demand_P1[(Demand_P1.Master_Customer_Name == 'HARMONY PUBLIC SCHOOLS')&(Demand_P1.Fiscal_Period == 1)]
+
+
+# In[34]:
+
+
+# P1 Aggregation 
+P1_agg = Demand_P1.pivot_table(index = 'Master_Customer_Name', columns = 'Fiscal_Year', values = 'Net_Sales', aggfunc = 'sum')
+P1_agg.head()
+
+
+# In[51]:
+
+
+# Total Sum  for 3 years 
+P1_agg['Total_Sum'] = P1_agg.sum(axis =1)
+P1_agg.head()
+# Sorting Sum
+P1_agg.sort_values("Total_Sum", ascending=False)
+
+
+# In[53]:
+
+
+#copying a dataframe
+P1_agg_copy = P1_agg.copy()
+
+
+# In[70]:
+
+
+P1_agg_copy 
+# Replacing NAN with Mean 
+P1_agg_copy[[2019,2021,2022]] = P1_agg_copy[[2019,2021,2022]].fillna(value = P1_agg_copy[[2019,2021,2022]].mean())
+print('Updated DataFrame:')
+print(P1_agg_copy)
+
+
+# In[29]:
+
+
+# Correlation Heat Map 
+plt.figure(figsize=(12,9))
+sns.heatmap(P1_agg.corr(),annot=True,cmap='RdBu')
+plt.title('Correlation Heatmap',fontsize=14)
+plt.yticks(rotation =0)
+plt.show()
+
+
+# In[42]:
+
+
+
+
+
+# In[43]:
+
+
+#Standardization 
+scaler = StandardScaler()
+P1_agg_std = scaler.fit_transform(P1_agg)
+print(P1_agg_std)
+
+
+# In[73]:
+
+
+#Standardization 
+scaler = StandardScaler()
+P1_agg_std_copy = scaler.fit_transform(P1_agg_copy)
+print(P1_agg_std_copy)
+
+
+# In[44]:
+
+
+
+
+
+# In[58]:
+
+
+#Building a Clustering Model 
+df_std = pd.DataFrame(data = P1_agg_std,columns = P1_agg.columns)
+
+
+# In[47]:
+
+
+#Building a Clustering Model 
+df_std = pd.DataFrame(data = P1_agg_std,columns = P1_agg.columns)
+print(df_std)
+
+
+# In[74]:
+
+
+# Copy Building a Clustering Model 
+df_std_copy = pd.DataFrame(data = P1_agg_std_copy,columns = P1_agg.columns)
+print(df_std_copy)
+
+
+# In[1]:
+
+
+# checking null values 
+df_std_copy.isnull().sum()
+
+
+# In[76]:
+
+
+# There are two components. Within Clusters Sum of Squares(WCSS) and Elbow Method.
+wcss = []
+for i in range(1,24):
+    kmeans_pca = KMeans(n_clusters = i, init = 'k-means++', random_state = 42)
+    kmeans_pca.fit(df_std_copy)
+    wcss.append(kmeans_pca.inertia_)
+
+
+# In[77]:
+
+
+#Contains any numeric values 
+np.any(np.isnan(df_std_copy))
+np.all(np.isfinite(df_std))
+
+
+# In[78]:
+
+
+
+#Let’s visualize them
+plt.figure(figsize = (10,8))
+plt.plot(range(1, 24), wcss, marker = 'o', linestyle = '-.',color='red')
+plt.xlabel('Number of Clusters')
+plt.ylabel('WCSS')
+plt.title('K-means Clustering')
+plt.show()
+
+
+# In[80]:
+
+
+# Performing K-means within 6 Clusters as it 6 clusters was threshold where we saw maximum decline 
+kmeans = KMeans(n_clusters = 6, init = 'k-means++', random_state = 42)
+
+
+# In[81]:
+
+
+#Fitting Our Model to the Dataset
+kmeans.fit(df_std_copy)
+
+
+# In[82]:
+
+
+df_std_copy["Cluster"] = kmeans.labels_
+
+
+# In[83]:
+
+
+# We create a new data frame with the original features and add a new column with the assigned clusters for each point.
+
+df_segm_kmeans= df_std_copy.copy()
+df_std_copy["Cluster"] = kmeans.labels_ 
+print(df_std_copy)
+
+
+# In[84]:
+
+
+df_segm_kmeans= df_std_copy.copy()
+print(df_segm_kmeans)
+
+
+# In[85]:
+
+
+#Let’s group the customers by clusters and see the average values for each variable.
+
+df_segm_analysis = df_std_copy.groupby(['Cluster']).mean()
+df_segm_analysis 
+
+
+# In[86]:
+
+
+#Let’s group the customers by clusters and see the average values for each variable. 
+df_segm_analysis.rename({0:'Steadily Increasing Customer Sales',
+                         1:'Customers with Sales highest in 2021',
+                         2:'Steady Decline',
+                         3:'Steady Customer/ Trusted Customer',
+                         4:'Exponential Growth OR New Customer',
+                         5: 'Customers with lower-end higher sales in 2021'}) 
+
